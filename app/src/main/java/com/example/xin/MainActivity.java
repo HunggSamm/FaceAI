@@ -428,16 +428,19 @@ public class MainActivity extends AppCompatActivity {
                 final String name = nearest.first;
                 distance = nearest.second;
                 if(distance<1.000f){ //If distance between Closest found face is more than 1.000 ,then output UNKNOWN face.
-                    String[] parts = name.split(" ", 2);
-                    String username = parts[0];
-                    String password = parts[1];
 
-                    // Chuyển sang LoginActivity và truyền tên người dùng
-                    Intent intent = new Intent(MainActivity.this, LoginActivity.class);
-                    intent.putExtra("USERNAME", username);
-                    intent.putExtra("PASSWORD", password);
-                    startActivity(intent);
-                    return username; // Trả về username
+                    String[] parts = name.split(" ", 2);
+                    if (parts.length >= 2) {
+                        String username = parts[0];
+                        String password = parts[1];
+
+                        // Chuyển sang LoginActivity và truyền tên người dùng
+                        Intent intent = new Intent(MainActivity.this, LoginActivity.class);
+                        intent.putExtra("USERNAME", username);
+                        intent.putExtra("PASSWORD", password);
+                        startActivity(intent);}
+
+                    return name; // Trả về username
                 }
                 else
                     return "unknown";

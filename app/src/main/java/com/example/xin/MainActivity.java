@@ -3,6 +3,8 @@ package com.example.xin;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
@@ -40,6 +42,8 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.face.Face;
 import com.google.mlkit.vision.face.FaceDetection;
@@ -49,19 +53,22 @@ import org.tensorflow.lite.Interpreter;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.ReadOnlyBufferException;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int PERMISSION_CODE = 1001;
@@ -85,12 +92,13 @@ public class MainActivity extends AppCompatActivity {
     private static final float IMAGE_MEAN = 128.0f;
     private static final float IMAGE_STD = 128.0f;
     private static final int INPUT_SIZE = 112;
-    private static final int OUTPUT_SIZE = 192;
+    private static final int OUTPUT_SIZE=192;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
         previewView = findViewById(R.id.previewView);
         previewView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
         graphicOverlay = findViewById(R.id.graphic_overlay);
@@ -104,6 +112,43 @@ public class MainActivity extends AppCompatActivity {
         switchCamBtn.setOnClickListener((view -> switchCamera()));
 
         loadModel();
+        loadRegisteredFaces();
+    }
+    private void loadRegisteredFaces() {
+        SharedPreferences sharedPreferences = getSharedPreferences("FaceRecognition", MODE_PRIVATE);
+        String json = sharedPreferences.getString("registered_faces", null);
+
+        if (json != null) {
+            Gson gson = new Gson();
+            Type type = new TypeToken<HashMap<String, Map<String, Object>>>() {}.getType();
+            HashMap<String, Map<String, Object>> tempMap = gson.fromJson(json, type);
+
+            if (tempMap != null) {
+                registered.clear();
+                for (Map.Entry<String, Map<String, Object>> entry : tempMap.entrySet()) {
+                    String name = entry.getKey();
+                    Map<String, Object> map = entry.getValue();
+                    String id = (String) map.get("id");
+                    String title = (String) map.get("title");
+                    float distance = ((Number) map.get("distance")).floatValue(); // Chuyển đổi từ Number sang float
+                    List<List<Double>> list = (List<List<Double>>) map.get("extra");
+
+                    // Chuyển đổi List<List<Double>> về float[][]
+                    float[][] embeddings = new float[list.size()][];
+                    for (int i = 0; i < list.size(); i++) {
+                        List<Double> innerList = list.get(i);
+                        embeddings[i] = new float[innerList.size()];
+                        for (int j = 0; j < innerList.size(); j++) {
+                            embeddings[i][j] = innerList.get(j).floatValue(); // Chuyển đổi từ Double sang float
+                        }
+                    }
+
+                    SimilarityClassifier.Recognition recognition = new SimilarityClassifier.Recognition(id, title, distance);
+                    recognition.setExtra(embeddings);
+                    registered.put(name, recognition);
+                }
+            }
+        }
     }
 
     @Override
@@ -112,9 +157,7 @@ public class MainActivity extends AppCompatActivity {
         startCamera();
     }
 
-    /**
-     * Permissions Handler
-     */
+    /** Permissions Handler */
     private void getPermissions() {
         ActivityCompat.requestPermissions(this, new String[]{CAMERA_PERMISSION}, PERMISSION_CODE);
     }
@@ -135,11 +178,9 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
-    /**
-     * Setup camera & use cases
-     */
+    /** Setup camera & use cases */
     private void startCamera() {
-        if (ContextCompat.checkSelfPermission(this, CAMERA_PERMISSION) == PackageManager.PERMISSION_GRANTED) {
+        if(ContextCompat.checkSelfPermission(this, CAMERA_PERMISSION) == PackageManager.PERMISSION_GRANTED) {
             setupCamera();
         } else {
             getPermissions();
@@ -233,13 +274,11 @@ public class MainActivity extends AppCompatActivity {
             flipX = false;
         }
 
-        if (cameraProvider != null) cameraProvider.unbindAll();
+        if(cameraProvider != null) cameraProvider.unbindAll();
         startCamera();
     }
 
-    /**
-     * Face detection processor
-     */
+    /** Face detection processor */
     @SuppressLint("UnsafeOptInUsageError")
     private void analyze(@NonNull ImageProxy image) {
         if (image.getImage() == null) return;
@@ -263,7 +302,7 @@ public class MainActivity extends AppCompatActivity {
         float scaleX = (float) previewView.getWidth() / (float) inputImage.getHeight();
         float scaleY = (float) previewView.getHeight() / (float) inputImage.getWidth();
 
-        if (faces.size() > 0) {
+        if(faces.size() > 0) {
             detectionTextView.setText(R.string.face_detected);
             // get first face detected
             Face face = faces.get(0);
@@ -277,42 +316,36 @@ public class MainActivity extends AppCompatActivity {
                     inputImage.getRotationDegrees(),
                     boundingBox);
 
-            if (start) name = recognizeImage(bitmap);
-            if (name != null) detectionTextView.setText(name);
-        } else {
+            if(start) name = recognizeImage(bitmap);
+            if(name != null) detectionTextView.setText(name);
+        }
+        else {
             detectionTextView.setText(R.string.no_face_detected);
         }
 
         graphicOverlay.draw(boundingBox, scaleX, scaleY, name);
     }
 
-    /**
-     * Recognize Processor
-     */
+    /** Recognize Processor */
     private void addFace() {
         start = false;
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Enter Name");
 
-        // Set up the input
         final EditText input = new EditText(this);
-
         input.setInputType(InputType.TYPE_CLASS_TEXT);
         input.setMaxWidth(200);
         builder.setView(input);
 
-        // Set up the buttons
         builder.setPositiveButton("ADD", (dialog, which) -> {
-            //Toast.makeText(context, input.getText().toString(), Toast.LENGTH_SHORT).show();
-
-            //Create and Initialize new object with Face embeddings and Name.
-            SimilarityClassifier.Recognition result = new SimilarityClassifier.Recognition(
-                    "0", "", -1f);
+            String name = input.getText().toString();
+            SimilarityClassifier.Recognition result = new SimilarityClassifier.Recognition("0", "", -1f);
             result.setExtra(embeddings);
+            registered.put(name, result);
 
-            registered.put(input.getText().toString(), result);
+            saveRegisteredFaces();
+
             start = true;
-
         });
         builder.setNegativeButton("Cancel", (dialog, which) -> {
             start = true;
@@ -320,6 +353,28 @@ public class MainActivity extends AppCompatActivity {
         });
 
         builder.show();
+    }
+
+    private void saveRegisteredFaces() {
+        SharedPreferences sharedPreferences = getSharedPreferences("FaceRecognition", MODE_PRIVATE);
+        SharedPreferences.Editor editor = sharedPreferences.edit();
+
+        Gson gson = new Gson();
+        HashMap<String, Map<String, Object>> tempMap = new HashMap<>();
+
+        for (Map.Entry<String, SimilarityClassifier.Recognition> entry : registered.entrySet()) {
+            SimilarityClassifier.Recognition recognition = entry.getValue();
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", recognition.getId());
+            map.put("title", recognition.getTitle());
+            map.put("distance", recognition.getDistance());
+            map.put("extra", Arrays.asList((float[][]) recognition.getExtra()));  // Chuyển đổi float[][] thành List<float[]>
+            tempMap.put(entry.getKey(), map);
+        }
+
+        String json = gson.toJson(tempMap);
+        editor.putString("registered_faces", json);
+        editor.apply();
     }
 
     public String recognizeImage(final Bitmap bitmap) {
@@ -360,6 +415,7 @@ public class MainActivity extends AppCompatActivity {
         tfLite.runForMultipleInputsOutputs(inputArray, outputMap); //Run model
 
 
+
         float distance;
 
         //Compare new face with saved Faces.
@@ -371,8 +427,18 @@ public class MainActivity extends AppCompatActivity {
 
                 final String name = nearest.first;
                 distance = nearest.second;
-                if (distance < 1.000f) //If distance between Closest found face is more than 1.000 ,then output UNKNOWN face.
-                    return name;
+                if(distance<1.000f){ //If distance between Closest found face is more than 1.000 ,then output UNKNOWN face.
+                    String[] parts = name.split(" ", 2);
+                    String username = parts[0];
+                    String password = parts[1];
+
+                    // Chuyển sang LoginActivity và truyền tên người dùng
+                    Intent intent = new Intent(MainActivity.this, LoginActivity.class);
+                    intent.putExtra("USERNAME", username);
+                    intent.putExtra("PASSWORD", password);
+                    startActivity(intent);
+                    return username; // Trả về username
+                }
                 else
                     return "unknown";
             }
@@ -393,7 +459,7 @@ public class MainActivity extends AppCompatActivity {
             float distance = 0;
             for (int i = 0; i < emb.length; i++) {
                 float diff = emb[i] - knownEmb[i];
-                distance += diff * diff;
+                distance += diff*diff;
             }
             distance = (float) Math.sqrt(distance);
             if (ret == null || distance < ret.second) {
@@ -405,9 +471,7 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    /**
-     * Bitmap Converter
-     */
+    /** Bitmap Converter */
     private Bitmap mediaImgToBmp(Image image, int rotation, Rect boundingBox) {
         //Convert media image to Bitmap
         Bitmap frame_bmp = toBitmap(image);
@@ -492,26 +556,27 @@ public class MainActivity extends AppCompatActivity {
 
         int width = image.getWidth();
         int height = image.getHeight();
-        int ySize = width * height;
-        int uvSize = width * height / 4;
+        int ySize = width*height;
+        int uvSize = width*height/4;
 
-        byte[] nv21 = new byte[ySize + uvSize * 2];
+        byte[] nv21 = new byte[ySize + uvSize*2];
 
         ByteBuffer yBuffer = image.getPlanes()[0].getBuffer(); // Y
         ByteBuffer uBuffer = image.getPlanes()[1].getBuffer(); // U
         ByteBuffer vBuffer = image.getPlanes()[2].getBuffer(); // V
 
         int rowStride = image.getPlanes()[0].getRowStride();
-        assert (image.getPlanes()[0].getPixelStride() == 1);
+        assert(image.getPlanes()[0].getPixelStride() == 1);
 
         int pos = 0;
 
         if (rowStride == width) { // likely
             yBuffer.get(nv21, 0, ySize);
             pos += ySize;
-        } else {
+        }
+        else {
             long yBufferPos = -rowStride; // not an actual position
-            for (; pos < ySize; pos += width) {
+            for (; pos<ySize; pos+=width) {
                 yBufferPos += rowStride;
                 yBuffer.position((int) yBufferPos);
                 yBuffer.get(nv21, pos, width);
@@ -521,15 +586,15 @@ public class MainActivity extends AppCompatActivity {
         rowStride = image.getPlanes()[2].getRowStride();
         int pixelStride = image.getPlanes()[2].getPixelStride();
 
-        assert (rowStride == image.getPlanes()[1].getRowStride());
-        assert (pixelStride == image.getPlanes()[1].getPixelStride());
+        assert(rowStride == image.getPlanes()[1].getRowStride());
+        assert(pixelStride == image.getPlanes()[1].getPixelStride());
 
         if (pixelStride == 2 && rowStride == width && uBuffer.get(0) == vBuffer.get(1)) {
             // maybe V an U planes overlap as per NV21, which means vBuffer[1] is alias of uBuffer[0]
             byte savePixel = vBuffer.get(1);
             try {
-                vBuffer.put(1, (byte) ~savePixel);
-                if (uBuffer.get(0) == (byte) ~savePixel) {
+                vBuffer.put(1, (byte)~savePixel);
+                if (uBuffer.get(0) == (byte)~savePixel) {
                     vBuffer.put(1, savePixel);
                     vBuffer.position(0);
                     uBuffer.position(0);
@@ -538,7 +603,8 @@ public class MainActivity extends AppCompatActivity {
 
                     return nv21; // shortcut
                 }
-            } catch (ReadOnlyBufferException ex) {
+            }
+            catch (ReadOnlyBufferException ex) {
                 // unfortunately, we cannot check if vBuffer and uBuffer overlap
             }
 
@@ -549,9 +615,9 @@ public class MainActivity extends AppCompatActivity {
         // other optimizations could check if (pixelStride == 1) or (pixelStride == 2),
         // but performance gain would be less significant
 
-        for (int row = 0; row < height / 2; row++) {
-            for (int col = 0; col < width / 2; col++) {
-                int vuPos = col * pixelStride + row * rowStride;
+        for (int row=0; row<height/2; row++) {
+            for (int col=0; col<width/2; col++) {
+                int vuPos = col*pixelStride + row*rowStride;
                 nv21[pos++] = vBuffer.get(vuPos);
                 nv21[pos++] = uBuffer.get(vuPos);
             }
@@ -562,7 +628,7 @@ public class MainActivity extends AppCompatActivity {
 
     private Bitmap toBitmap(Image image) {
 
-        byte[] nv21 = YUV_420_888toNV21(image);
+        byte[] nv21=YUV_420_888toNV21(image);
 
 
         YuvImage yuvImage = new YuvImage(nv21, ImageFormat.NV21, image.getWidth(), image.getHeight(), null);
@@ -575,9 +641,7 @@ public class MainActivity extends AppCompatActivity {
         return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
     }
 
-    /**
-     * Model loader
-     */
+    /** Model loader */
     @SuppressWarnings("deprecation")
     private void loadModel() {
         try {

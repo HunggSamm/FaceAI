@@ -20,6 +20,18 @@ public interface SimilarityClassifier {
 
         }
 
+        public String getId() {
+            return id;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public Float getDistance() {
+            return distance;
+        }
+
         public void setExtra(Object extra) {
             this.extra = extra;
         }

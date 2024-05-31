@@ -51,4 +51,5 @@ dependencies {
     // TensorFlow Lite
     implementation("org.tensorflow:tensorflow-lite:0.7.0")
     implementation("org.tensorflow:tensorflow-lite:2.8.0")
+    implementation("com.google.code.gson:gson:2.8.8")
 }
